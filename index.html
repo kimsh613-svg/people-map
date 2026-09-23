@@ -161,7 +161,7 @@
     <button class="secondary" onclick="toggleSheet()" id="sheetBtn">메뉴</button>
   </div>
   <h1>People Map</h1>
-  <div id="whoami"><span id="whoName"></span><button class="link" onclick="logout()">로그아웃</button></div>
+  <div id="whoami"><span id="whoName"></span><span><button class="link" onclick="openPw()">비밀번호 변경</button> · <button class="link" onclick="logout()">로그아웃</button></span></div>
   <div id="status">불러오는 중…</div>
 
   <h2>인물 추가</h2>
@@ -203,6 +203,21 @@
     </details>
   </div>
 </aside>
+
+<!-- 비밀번호 변경 -->
+<div class="overlay" id="pwScreen" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="card">
+    <h1>비밀번호 변경</h1>
+    <input id="pwOld" type="password" placeholder="지금 비밀번호" autocomplete="current-password">
+    <input id="pwNew" type="password" placeholder="새 비밀번호" autocomplete="new-password">
+    <input id="pwNew2" type="password" placeholder="새 비밀번호 확인" autocomplete="new-password" onkeydown="if(event.key==='Enter')changePw()">
+    <div class="row">
+      <button class="secondary" onclick="pwScreen.classList.remove('show')">취소</button>
+      <button onclick="changePw()">변경</button>
+    </div>
+    <p class="hint" id="pwMsg"></p>
+  </div>
+</div>
 
 <!-- 관계 표 -->
 <div class="overlay" id="tableScreen" onclick="if(event.target===this)closeTable()">
@@ -415,6 +430,28 @@ async function changeDataRepo() {
   if (!chk.ok) { diagOut.textContent = "바꾸지 못했어요: " + chk.msg; return; }
   cfg = await updateFile(siteRepo(), USERS_FILE, SITE.branch, c => ({ ...c, dataRepo:repo, dataBranch:chk.branch }), `데이터 레포 변경: ${repo}`);
   diagOut.textContent = "바꿨어요. 저장을 다시 시도할게요."; reload(); scheduleSave();
+}
+
+/* ============ 비밀번호 변경 (모든 사용자) ============ */
+function openPw() {
+  pwOld.value = pwNew.value = pwNew2.value = ""; pwMsg.textContent = "";
+  pwScreen.classList.add("show"); if (isPhone()) toggleSheet(false);
+}
+async function changePw() {
+  if (!pwNew.value) { pwMsg.textContent = "새 비밀번호를 적어 주세요."; return; }
+  if (pwNew.value !== pwNew2.value) { pwMsg.textContent = "새 비밀번호 두 칸이 달라요."; return; }
+  pwMsg.textContent = "확인 중…";
+  const mine = cfg.users.find(u => u.id === me.id);
+  try { await unlockToken(mine, pwOld.value); }
+  catch (e) { pwMsg.textContent = "지금 비밀번호가 틀렸어요."; return; }
+  try {
+    const locked = await lockToken(token, pwNew.value);
+    cfg = await updateFile(siteRepo(), USERS_FILE, SITE.branch,
+      c => ({ ...c, users: c.users.map(u => u.id === me.id ? { ...u, ...locked } : u) }), `비밀번호 변경: ${me.id}`);
+    me = cfg.users.find(u => u.id === me.id);
+    pwMsg.textContent = "바꿨어요 ✓ 1~2분 뒤부터 다른 기기에서도 새 비밀번호로 로그인돼요.";
+    setTimeout(() => pwScreen.classList.remove("show"), 1500);
+  } catch (e) { pwMsg.textContent = "실패: " + e.message; }
 }
 
 /* ============ 계정 관리 (관리자) ============ */
