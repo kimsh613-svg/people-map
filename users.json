@@ -8,6 +8,13 @@
       "salt": "0/p//swbVbkniomXUmI7zQ==",
       "iv": "fXZVeCQtwuCS7zQP",
       "ct": "Il/opO/jzxomDrVIhbwjH9FhJFLrJtO5FTbmo5TF8C+sVu4/iEnFRIogegtk31ES9BiKaY9y0llvjLJNN3/UZ1Mco7AUWHBTxLmQ+P9Q4Ojh28QlZKaFFlKns5MTHzXQS+onf6tjWjvTSzRxPw=="
+    },
+    {
+      "id": "city",
+      "role": "member",
+      "salt": "8t+/7BgYE+DO+epbJUZQhg==",
+      "iv": "GRFFbSG9Fl2Ji7w5",
+      "ct": "yYwFzwfHfnAP2dAhhSDqSaxyDkEZwIx21HNVKFca2ZNwQi7CdGJndBGZNNicVMM3w8j8wIgN/WeW5Jj4fcjRHW1Iml21g9ysCNWCQwfXDfi/WD1B8HHHdlIdAEiJpRYUVhVnxHTuaJubX01aKw=="
     }
   ]
 }
