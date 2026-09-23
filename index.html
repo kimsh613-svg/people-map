@@ -115,6 +115,13 @@
     <h2>관리자</h2>
     <button class="secondary" onclick="openLog()">작업 기록 보기</button>
     <details>
+      <summary>연결 점검 / 데이터 레포 변경</summary>
+      <button class="secondary" onclick="diagnose()">연결 점검</button>
+      <div id="diagOut" class="hint"></div>
+      <input id="newDataRepo" placeholder="데이터 레포 (예: 아이디/people-map-data)">
+      <button class="secondary" onclick="changeDataRepo()">데이터 레포 바꾸기</button>
+    </details>
+    <details>
       <summary>계정 관리</summary>
       <input id="newId" placeholder="새 아이디">
       <input id="newPw" type="text" placeholder="비밀번호">
@@ -212,9 +219,22 @@ async function putFile(repo, path, branch, json, sha, message) {
   if (sha) body.sha = sha;
   const r = await fetch(gh(repo, path), { method:"PUT", headers:{ ...hdr(), "Content-Type":"application/json" }, body:JSON.stringify(body) });
   if (r.status === 409 || r.status === 422) return null;             // 그 사이 다른 사람이 바꿈 → 다시 시도
-  if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error("저장 권한이 없어요. 관리자에게 문의하세요.");
+  if (r.status === 401 || r.status === 403 || r.status === 404) {
+    let why = ""; try { why = (await r.json()).message || ""; } catch (e) {}
+    throw new Error(`저장 권한이 없어요 (${repo}, ${r.status} ${why}). 관리자는 '연결 점검'을 눌러 보세요.`);
+  }
   if (!r.ok) throw new Error(`GitHub 응답 ${r.status}`);
   return (await r.json()).content.sha;
+}
+// 레포 접근 점검: 있는지, 쓸 수 있는지, 기본 브랜치가 뭔지
+async function checkRepo(repo) {
+  const r = await fetch(`https://api.github.com/repos/${repo}?t=${Date.now()}`, { headers:hdr(), cache:"no-store" });
+  if (r.status === 401) return { ok:false, msg:"토큰이 틀렸거나 만료됐어요." };
+  if (r.status === 404) return { ok:false, msg:"레포를 찾을 수 없어요. 레포 이름 철자, 그리고 토큰을 만들 때 이 레포를 선택했는지 확인하세요." };
+  if (!r.ok) return { ok:false, msg:`GitHub 응답 ${r.status}` };
+  const j = await r.json();
+  if (!j.permissions?.push) return { ok:false, msg:"읽기만 가능해요. 토큰의 Contents 권한을 'Read and write'로 해 주세요." };
+  return { ok:true, branch:j.default_branch, msg:`정상 (브랜치: ${j.default_branch})` };
 }
 // 최신본을 받아서 고친 뒤 저장. 충돌하면 최신본을 다시 받아 재시도
 async function updateFile(repo, path, branch, change, message) {
@@ -251,8 +271,9 @@ async function setup() {
   if (!SITE.owner) { setupMsg.textContent = "GitHub Pages 주소에서 열어 주세요."; return; }
   setupMsg.textContent = "설정 중…"; token = tok;
   try {
-    await getFile(repo, DATA_FILE, "main");   // 데이터 레포 접근 확인
-    const first = { dataRepo:repo, dataBranch:"main", users:[{ id, role:"admin", ...(await lockToken(tok, pw)) }] };
+    const chk = await checkRepo(repo);   // 데이터 레포 접근 확인
+    if (!chk.ok) throw new Error("데이터 레포: " + chk.msg);
+    const first = { dataRepo:repo, dataBranch:chk.branch, users:[{ id, role:"admin", ...(await lockToken(tok, pw)) }] };
     cfg = await updateFile(siteRepo(), USERS_FILE, SITE.branch, cur => cur || first, `관리자 계정 생성: ${id}`);
     me = cfg.users.find(u => u.id === id);
     if (!me) throw new Error("이미 설정되어 있어요. 새로고침 후 로그인하세요.");
@@ -276,6 +297,27 @@ function enter() {
   adminArea.style.display = me.role === "admin" ? "" : "none";
   renderUsers(); reload();
   if (pending.length) scheduleSave();
+}
+
+/* ============ 연결 점검 (관리자) ============ */
+async function diagnose() {
+  diagOut.textContent = "점검 중…";
+  const a = await checkRepo(siteRepo()), b = await checkRepo(dataRepo());
+  diagOut.innerHTML = `페이지 레포 <b>${esc(siteRepo())}</b>: ${esc(a.msg)}<br>데이터 레포 <b>${esc(dataRepo())}</b>: ${esc(b.msg)}`;
+  if (b.ok && b.branch !== dataBranch()) {
+    cfg = await updateFile(siteRepo(), USERS_FILE, SITE.branch, c => ({ ...c, dataBranch:b.branch }), `데이터 브랜치 수정: ${b.branch}`);
+    diagOut.innerHTML += `<br>브랜치 설정을 ${esc(b.branch)}(으)로 고쳤어요.`;
+  }
+  newDataRepo.value = dataRepo();
+}
+async function changeDataRepo() {
+  const repo = newDataRepo.value.trim().replace(/^https:\/\/github.com\//, "").replace(/\/$/, "");
+  if (!repo.includes("/")) { diagOut.textContent = "아이디/레포이름 형식으로 적어 주세요."; return; }
+  diagOut.textContent = "확인 중…";
+  const chk = await checkRepo(repo);
+  if (!chk.ok) { diagOut.textContent = "바꾸지 못했어요: " + chk.msg; return; }
+  cfg = await updateFile(siteRepo(), USERS_FILE, SITE.branch, c => ({ ...c, dataRepo:repo, dataBranch:chk.branch }), `데이터 레포 변경: ${repo}`);
+  diagOut.textContent = "바꿨어요. 저장을 다시 시도할게요."; reload(); scheduleSave();
 }
 
 /* ============ 계정 관리 (관리자) ============ */
