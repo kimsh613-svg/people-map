@@ -2,13 +2,15 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>People Map</title>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
   :root { --bg:#f7f7f5; --panel:#fff; --line:#ddd; --text:#222; --accent:#3b6ea5; }
   * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; }
+  body { margin:0; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; height:100dvh; overflow:hidden; -webkit-tap-highlight-color:transparent; }
   #side { width:300px; padding:16px; background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; }
   #mapWrap { flex:1; position:relative; }
   #map { position:absolute; inset:0; }
@@ -32,11 +34,15 @@
   details summary { cursor:pointer; font-size:13px; color:#555; margin:6px 0; }
   #userList div { display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:3px 0; }
   #userList button { width:auto; padding:2px 8px; margin:0; font-size:12px; }
-  #legend { position:absolute; right:12px; top:12px; background:rgba(255,255,255,.95); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13px; }
+  #legend { position:absolute; right:12px; top:12px; max-width:calc(100% - 24px); background:rgba(255,255,255,.95); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13px; }
   #legend .item { display:flex; align-items:center; gap:8px; margin:4px 0; cursor:pointer; user-select:none; }
   #legend .item.off { opacity:.3; }
   #legend .swatch { width:34px; height:0; border-top-width:4px; }
   #legend .note { font-size:11px; color:#888; margin-top:6px; }
+  #legend .head { display:none; font-weight:600; cursor:pointer; user-select:none; }
+  #legend.collapsed .item, #legend.collapsed .note { display:none; }
+  .logWrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  #sheetHandle, #peek, #selBar { display:none; }
 
   .overlay { position:fixed; inset:0; background:rgba(30,30,30,.45); display:none; align-items:center; justify-content:center; z-index:10; padding:16px; }
   .overlay.show { display:flex; }
@@ -51,7 +57,53 @@
   .chip { width:auto; padding:8px 12px; margin:0; border-radius:999px; background:#fff; color:var(--text); border:2px solid var(--c); font-weight:600; }
   .chip.on { background:var(--c); color:#fff; }
   #relTitle { font-size:17px; margin:0 0 4px; }
-  @media (max-width:700px){ body{flex-direction:column;} #side{width:100%; height:50vh;} }
+  /* 태블릿: 사이드바를 조금 좁게 */
+  @media (min-width:700px) and (max-width:1100px) { #side { width:260px; } #search { width:190px; } }
+
+  /* 터치 화면: 손가락으로 누르기 쉽게 크게, iOS 확대 방지용 16px 글자 */
+  @media (pointer:coarse) {
+    input, select, button { font-size:16px; min-height:44px; }
+    input[type=range] { min-height:32px; }
+    .chip { padding:10px 14px; }
+    #legend .item { padding:4px 0; }
+    #userList button { min-height:34px; }
+  }
+
+  /* 휴대폰: 지도 전체 화면 + 아래에서 올라오는 패널 */
+  @media (max-width:699px) {
+    body { display:block; }
+    #mapWrap { position:fixed; inset:0; }
+    #side {
+      position:fixed; left:0; right:0; bottom:0; width:auto; z-index:5;
+      max-height:82dvh; border-right:none; border-radius:16px 16px 0 0;
+      box-shadow:0 -4px 24px rgba(0,0,0,.15); padding:0 16px calc(16px + env(safe-area-inset-bottom));
+      transform:translateY(calc(100% - 76px - env(safe-area-inset-bottom))); transition:transform .25s ease;
+      overflow-y:hidden;
+    }
+    #side.open { transform:none; overflow-y:auto; }
+    #sheetHandle { display:block; width:40px; height:5px; border-radius:3px; background:#ccc; margin:8px auto 6px; }
+    #peek { display:flex; gap:8px; align-items:center; height:56px; position:sticky; top:0; background:var(--panel); z-index:1; }
+    #peek #peekStatus { flex:1; font-size:13px; color:#555; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #peek #peekStatus.dirty { color:#9a6b00; } #peek #peekStatus.err { color:#c0392b; }
+    #peek button { width:auto; margin:0; padding:0 14px; }
+    #side h1, #side #status { display:none; }
+    #search { left:12px; right:auto; width:calc(100% - 132px); top:calc(12px + env(safe-area-inset-top)); }
+    #legend { top:calc(12px + env(safe-area-inset-top)); padding:8px 10px; }
+    #legend .head { display:block; }
+    #selBar {
+      position:fixed; left:12px; right:12px; bottom:calc(88px + env(safe-area-inset-bottom)); z-index:4;
+      background:#fff; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,.15); padding:10px 12px;
+      align-items:center; gap:8px; font-size:14px;
+    }
+    #selBar.show { display:flex; }
+    #selBar span { flex:1; line-height:1.35; }
+    #selBar button { width:auto; margin:0; padding:0 12px; }
+    .overlay { align-items:flex-end; padding:0; }
+    .card { max-width:none; border-radius:16px 16px 0 0; max-height:88dvh; padding-bottom:calc(22px + env(safe-area-inset-bottom)); }
+    .card.wide { max-width:none; }
+    #loginScreen, #setupScreen { align-items:center; padding:16px; }
+    #loginScreen .card, #setupScreen .card { border-radius:12px; }
+  }
 </style>
 </head>
 <body>
@@ -87,11 +139,17 @@
     <div class="row" style="align-items:center"><h1 style="margin:0">작업 기록</h1>
       <button class="secondary" style="max-width:80px;margin:0" onclick="logScreen.classList.remove('show')">닫기</button></div>
     <input id="logFilter" placeholder="아이디나 내용으로 찾기" oninput="renderLog()" style="margin-top:12px">
-    <table><thead><tr><th>시간</th><th>작업자</th><th>내용</th></tr></thead><tbody id="logBody"></tbody></table>
+    <div class="logWrap"><table><thead><tr><th>시간</th><th>작업자</th><th>내용</th></tr></thead><tbody id="logBody"></tbody></table></div>
   </div>
 </div>
 
 <aside id="side">
+  <div id="sheetHandle" onclick="toggleSheet()"></div>
+  <div id="peek">
+    <span id="peekStatus" onclick="toggleSheet()">불러오는 중…</span>
+    <button onclick="quickAdd()">+ 인물</button>
+    <button class="secondary" onclick="toggleSheet()" id="sheetBtn">메뉴</button>
+  </div>
   <h1>People Map</h1>
   <div id="whoami"><span id="whoName"></span><button class="link" onclick="logout()">로그아웃</button></div>
   <div id="status">불러오는 중…</div>
@@ -101,7 +159,7 @@
   <button onclick="addPerson()">추가</button>
 
   <h2>관계 추가</h2>
-  <p class="hint">지도에서 <b>두 사람을 차례로 클릭</b>하면 연결 창이 떠요. 이름을 쳐서 찾을 수도 있어요.</p>
+  <p class="hint">지도에서 <b>두 사람을 차례로 클릭(탭)</b>하면 연결 창이 떠요. 이름을 쳐서 찾을 수도 있어요.</p>
   <input id="rFrom" list="people" placeholder="첫 번째 사람 (이름 입력)" autocomplete="off">
   <input id="rTo" list="people" placeholder="두 번째 사람 (이름 입력)" autocomplete="off" onkeydown="if(event.key==='Enter')pickByName()">
   <button onclick="pickByName()">다음</button>
@@ -148,6 +206,10 @@
 
 <div id="mapWrap">
   <div id="map"></div>
+  <div id="selBar"><span id="selText"></span>
+    <button class="danger" onclick="deleteSelected()">삭제</button>
+    <button class="secondary" onclick="clearSelection()">취소</button>
+  </div>
   <input id="search" list="people" placeholder="🔍 사람 찾기" autocomplete="off" onchange="findPerson()" onkeydown="if(event.key==='Enter')findPerson()">
   <div id="legend"></div>
 </div>
@@ -422,7 +484,7 @@ const network = new vis.Network(document.getElementById("map"), { nodes, edges }
            color:{ background:"#ffffff", border:"#888", highlight:{ background:"#fff", border:"#222" } } },
   edges: { smooth:{ type:"continuous" }, selectionWidth:2 },
   physics: { solver:"forceAtlas2Based", forceAtlas2Based:{ springLength:160, gravitationalConstant:-60 } },
-  interaction: { hover:true },
+  interaction: { hover: matchMedia("(hover:hover)").matches, zoomView:true, dragView:true },
 });
 function styleEdge(e) {
   const t = TYPES[e.type] || TYPES.work;
@@ -440,13 +502,25 @@ function render(updateStatus = true) {
   if (logScreen.classList.contains("show")) renderLog();
   if (updateStatus) setStatus(pending.length ? `저장 대기 중 (${pending.length}개)` : `인물 ${view.nodes.length}명 · 관계 ${view.edges.length}개`, pending.length ? "dirty" : "");
 }
-function setStatus(msg, cls = "") { const s = document.getElementById("status"); s.textContent = msg; s.className = cls; }
+function setStatus(msg, cls = "") {
+  for (const id of ["status", "peekStatus"]) { const s = document.getElementById(id); s.textContent = msg; s.className = cls; }
+}
+
+/* ============ 휴대폰 화면: 아래 패널 열고 닫기 ============ */
+const isPhone = () => matchMedia("(max-width:699px)").matches;
+function toggleSheet(open) {
+  const o = side.classList.toggle("open", open);
+  sheetBtn.textContent = o ? "닫기" : "메뉴";
+  if (!o) side.scrollTop = 0;
+}
+function quickAdd() { toggleSheet(true); setTimeout(() => pName.focus(), 260); }
 
 function renderLegend() {
   legend.innerHTML = Object.entries(TYPES).map(([k,t]) =>
     `<div class="item ${hidden.has(k)?"off":""}" onclick="toggleType('${k}')">
        <span class="swatch" style="border-top-color:${t.color};border-top-style:${t.dashes?"dashed":"solid"}"></span>${t.name}</div>`
-  ).join("") + `<div class="note">굵기 = 강도 · 클릭해서 숨기기</div>`;
+  ).join("") + `<div class="note">굵기 = 강도 · 눌러서 숨기기</div>`;
+  legend.insertAdjacentHTML("afterbegin", `<div class="head" onclick="legend.classList.toggle('collapsed');renderLegend()">범례 ${legend.classList.contains("collapsed") ? "▾" : "▴"}</div>`);
 }
 function toggleType(k) { hidden.has(k) ? hidden.delete(k) : hidden.add(k); renderLegend(); render(false); }
 
@@ -456,6 +530,7 @@ function addPerson() {
   if (nodes.get(name)) { setStatus("이미 있는 이름이에요", "err"); return; }
   push({ op:"addNode", node:{ id:name, label:name } });
   pName.value = "";
+  if (isPhone()) { toggleSheet(false); setStatus(`'${name}' 추가됨`); }
 }
 /* 관계 연결: 지도에서 두 사람을 차례로 클릭하거나, 이름으로 고르기 */
 let relPair = null, firstPick = null;
@@ -487,7 +562,7 @@ function findPerson() {
   if (!nodes.get(name)) return;
   network.selectNodes([name]); network.focus(name, { scale:1.3, animation:{ duration:500 } });
   firstPick = name; showSelection({ type:"node", id:name });
-  search.value = "";
+  search.value = ""; search.blur();
 }
 
 let selected = null;
@@ -495,11 +570,20 @@ function showSelection(sel) {
   selected = sel;
   const el = document.getElementById("selected");
   delBtn.disabled = !sel;
+  selBar.classList.toggle("show", !!sel);
   if (!sel) { el.textContent = "지도에서 인물이나 선을 클릭하세요"; return; }
-  if (sel.type === "node") el.innerHTML = `<b>${esc(sel.id)}</b> 선택됨<br>연결하려면 다른 사람을 클릭하세요. (삭제하면 연결된 관계도 함께 지워져요)`;
-  else { const e = edges.get(sel.id); el.textContent = `관계: ${e.from} – ${e.to} (${TYPES[e.type]?.name}, 강도 ${e.strength})`; }
+  if (sel.type === "node") {
+    el.innerHTML = `<b>${esc(sel.id)}</b> 선택됨<br>연결하려면 다른 사람을 클릭하세요. (삭제하면 연결된 관계도 함께 지워져요)`;
+    selText.innerHTML = `<b>${esc(sel.id)}</b> 선택됨<br><small>연결할 사람을 탭하세요</small>`;
+  } else {
+    const e = edges.get(sel.id);
+    el.textContent = `관계: ${e.from} – ${e.to} (${TYPES[e.type]?.name}, 강도 ${e.strength})`;
+    selText.innerHTML = `<b>${esc(e.from)} – ${esc(e.to)}</b><br><small>${TYPES[e.type]?.name} · 강도 ${e.strength}</small>`;
+  }
 }
+function clearSelection() { firstPick = null; network.unselectAll(); showSelection(null); }
 network.on("click", p => {
+  if (side.classList.contains("open")) toggleSheet(false);   // 휴대폰: 지도를 누르면 패널 닫기
   if (p.nodes.length) {
     const id = p.nodes[0];
     if (firstPick && firstPick !== id && nodes.get(firstPick)) { openRel(firstPick, id); return; }
@@ -514,6 +598,7 @@ function deleteSelected() {
   document.getElementById("selected").textContent = "삭제됨";
 }
 
+if (isPhone()) legend.classList.add("collapsed");
 renderLegend();
 start();
 </script>
