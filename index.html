@@ -43,6 +43,15 @@
   #legend.collapsed .item, #legend.collapsed .note { display:none; }
   .logWrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
   #sheetHandle, #peek, #selBar { display:none; }
+  .pill { display:inline-block; padding:2px 8px; margin:2px 4px 2px 0; border-radius:999px; font-size:12px; font-weight:600; color:#fff; background:var(--c); white-space:nowrap; }
+  .pill.dash { background:#fff; color:var(--c); border:2px dashed var(--c); padding:0 6px; }
+  #relTable tbody tr { cursor:pointer; }
+  #relTable tbody tr:hover { background:#f5f7fa; }
+  #tableSummary { margin:10px 0; }
+  #focusBar { display:none; position:absolute; left:50%; transform:translateX(-50%); bottom:16px; z-index:3;
+    background:#222; color:#fff; border-radius:999px; padding:6px 6px 6px 14px; font-size:13px; align-items:center; gap:8px; box-shadow:0 2px 10px rgba(0,0,0,.2); white-space:nowrap; }
+  #focusBar.show { display:flex; }
+  #focusBar button { width:auto; margin:0; padding:4px 10px; min-height:0; border-radius:999px; background:#fff; color:#222; font-size:13px; }
 
   .overlay { position:fixed; inset:0; background:rgba(30,30,30,.45); display:none; align-items:center; justify-content:center; z-index:10; padding:16px; }
   .overlay.show { display:flex; }
@@ -96,6 +105,7 @@
       align-items:center; gap:8px; font-size:14px;
     }
     #selBar.show { display:flex; }
+    #focusBar { top:calc(64px + env(safe-area-inset-top)); bottom:auto; }
     #selBar span { flex:1; line-height:1.35; }
     #selBar button { width:auto; margin:0; padding:0 12px; }
     .overlay { align-items:flex-end; padding:0; }
@@ -165,6 +175,11 @@
   <button onclick="pickByName()">다음</button>
   <datalist id="people"></datalist>
 
+  <h2>표</h2>
+  <p class="hint">한 사람의 관계를 표로 정리해서 보여줘요. 지도에서 사람을 누르면 자동으로 채워져요.</p>
+  <input id="tName" list="people" placeholder="사람 이름" autocomplete="off" onkeydown="if(event.key==='Enter')openTable()">
+  <button onclick="openTable()">표 보기</button>
+
   <h2>선택 / 삭제</h2>
   <div id="selected">지도에서 인물이나 선을 클릭하세요</div>
   <button class="danger" id="delBtn" onclick="deleteSelected()" disabled>선택 항목 삭제</button>
@@ -189,11 +204,24 @@
   </div>
 </aside>
 
+<!-- 관계 표 -->
+<div class="overlay" id="tableScreen" onclick="if(event.target===this)closeTable()">
+  <div class="card wide">
+    <div class="row" style="align-items:center"><h1 style="margin:0" id="tableTitle"></h1>
+      <button class="secondary" style="max-width:80px;margin:0" onclick="closeTable()">닫기</button></div>
+    <div id="tableSummary"></div>
+    <button class="secondary" onclick="focusOn(tablePerson);closeTable()">지도에서 이 사람 관계만 보기</button>
+    <input id="tableFilter" placeholder="이름이나 관계로 찾기" oninput="renderTable()">
+    <div class="logWrap"><table id="relTable"><thead><tr><th>상대</th><th>관계</th></tr></thead><tbody id="tableBody"></tbody></table></div>
+    <p class="hint">줄을 누르면 지도에서 그 사람으로 이동해요.</p>
+  </div>
+</div>
+
 <!-- 관계 연결 창 -->
 <div class="overlay" id="relScreen" onclick="if(event.target===this)closeRel()">
   <div class="card">
     <p id="relTitle"></p>
-    <p class="hint">어떤 관계인가요?</p>
+    <p class="hint">어떤 관계인가요? <b>여러 개</b> 고를 수 있어요.</p>
     <div class="chips" id="relChips"></div>
     <label class="small">강도 (선 굵기) <span id="rStrengthVal">3</span></label>
     <input type="range" id="rStrength" min="1" max="5" value="3" oninput="rStrengthVal.textContent=this.value">
@@ -206,7 +234,9 @@
 
 <div id="mapWrap">
   <div id="map"></div>
+  <div id="focusBar"><span id="focusText"></span><button onclick="focusOn(null)">전체 보기</button></div>
   <div id="selBar"><span id="selText"></span>
+    <button id="selTableBtn" onclick="openTable(selected.id)">표</button>
     <button class="danger" onclick="deleteSelected()">삭제</button>
     <button class="secondary" onclick="clearSelection()">취소</button>
   </div>
@@ -237,10 +267,11 @@ const TYPES = {
   hostile: { name:"적대",     color:"#d0342c" },
   cut:     { name:"손절",     color:"#555555", dashes:[8,6] },
 };
-let relType = "close";
+let relTypes = new Set(["close"]);
+function toggleRelType(k) { relTypes.has(k) ? relTypes.delete(k) : relTypes.add(k); renderChips(); }
 function renderChips() {
   relChips.innerHTML = Object.entries(TYPES).map(([k,t]) =>
-    `<button class="chip ${k===relType?"on":""}" style="--c:${t.color}" onclick="relType='${k}';renderChips()">${t.name}</button>`).join("");
+    `<button class="chip ${relTypes.has(k)?"on":""}" style="--c:${t.color}" onclick="toggleRelType('${k}')">${relTypes.has(k)?"✓ ":""}${t.name}</button>`).join("");
 }
 renderChips();
 
@@ -490,6 +521,20 @@ const network = new vis.Network(document.getElementById("map"), { nodes, edges }
   physics: { solver:"forceAtlas2Based", forceAtlas2Based:{ springLength:160, gravitationalConstant:-60 } },
   interaction: { hover: matchMedia("(hover:hover)").matches, zoomView:true, dragView:true },
 });
+// 같은 두 사람 사이에 관계가 여러 개면 선을 서로 다른 곡선으로 벌려서 모두 보이게
+function spreadParallel(list) {
+  const groups = {};
+  for (const e of list) { const k = [e.from, e.to].sort().join("\u0000"); (groups[k] ||= []).push(e); }
+  for (const g of Object.values(groups)) {
+    if (g.length === 1) { g[0].smooth = { type:"continuous" }; continue; }
+    g.forEach((e, i) => {
+      let off = i - (g.length - 1) / 2;                 // 가운데를 기준으로 양쪽으로
+      if (e.from > e.to) off = -off;                    // 방향이 반대인 선도 같은 기준으로
+      e.smooth = { type: off >= 0 ? "curvedCW" : "curvedCCW", roundness: Math.min(0.25 * Math.abs(off), 0.8) };
+    });
+  }
+  return list;
+}
 function styleEdge(e) {
   const t = TYPES[e.type] || TYPES.work;
   return { ...e, color:{ color:t.color, highlight:t.color, hover:t.color },
@@ -499,11 +544,20 @@ function styleEdge(e) {
 function sync(ds, items) { const ids = new Set(items.map(i => i.id)); ds.remove(ds.getIds().filter(id => !ids.has(id))); ds.update(items); }
 function render(updateStatus = true) {
   const view = applyOps(remote, pending);
-  sync(nodes, view.nodes.map(n => ({ id:n.id, label:n.label })));
-  sync(edges, view.edges.map(styleEdge));
+  // "이 사람 관계만 보기": 그 사람과 연결된 사람/선만 남김
+  if (focusPerson && !view.nodes.some(n => n.id === focusPerson)) focusOn(null, false);
+  const near = new Set([focusPerson]);
+  if (focusPerson) view.edges.forEach(e => { if (e.from === focusPerson) near.add(e.to); if (e.to === focusPerson) near.add(e.from); });
+  sync(nodes, view.nodes.map(n => ({ id:n.id, label:n.label, hidden: !!focusPerson && !near.has(n.id) })));
+  sync(edges, spreadParallel(view.edges.map(e => {
+    const st = styleEdge(e);
+    if (focusPerson && e.from !== focusPerson && e.to !== focusPerson) st.hidden = true;
+    return st;
+  })));
   document.getElementById("people").innerHTML = view.nodes.map(n => n.label).sort((a,b) => a.localeCompare(b, "ko"))
     .map(l => `<option value="${esc(l)}"></option>`).join("");
   if (logScreen.classList.contains("show")) renderLog();
+  if (tableScreen.classList.contains("show")) renderTable();
   if (updateStatus) setStatus(pending.length ? `저장 대기 중 (${pending.length}개)` : `인물 ${view.nodes.length}명 · 관계 ${view.edges.length}개`, pending.length ? "dirty" : "");
 }
 function setStatus(msg, cls = "") {
@@ -528,6 +582,54 @@ function renderLegend() {
 }
 function toggleType(k) { hidden.has(k) ? hidden.delete(k) : hidden.add(k); renderLegend(); render(false); }
 
+/* ============ 관계 표 ============ */
+let tablePerson = null, focusPerson = null;
+function openTable(name) {
+  name = (name || tName.value || "").trim();
+  if (!nodes.get(name)) { setStatus("표를 볼 사람을 고르거나 이름을 입력하세요", "err"); return; }
+  tablePerson = name; tableFilter.value = "";
+  tableTitle.textContent = `${name}의 관계`;
+  renderTable(); tableScreen.classList.add("show");
+  if (isPhone()) toggleSheet(false);
+}
+function closeTable() { tableScreen.classList.remove("show"); }
+const pill = (type, strength) => {
+  const t = TYPES[type] || { name:type, color:"#888" };
+  return `<span class="pill ${t.dashes ? "dash" : ""}" style="--c:${t.color}">${esc(t.name)}${strength ? " " + strength : ""}</span>`;
+};
+function renderTable() {
+  if (!tablePerson) return;
+  const mine = applyOps(remote, pending).edges.filter(e => e.from === tablePerson || e.to === tablePerson);
+  // 상대별로 묶기
+  const byPerson = {};
+  for (const e of mine) { const other = e.from === tablePerson ? e.to : e.from; (byPerson[other] ||= []).push(e); }
+  // 관계 종류별 개수
+  const count = {};
+  mine.forEach(e => count[e.type] = (count[e.type] || 0) + 1);
+  tableSummary.innerHTML = `연결된 사람 <b>${Object.keys(byPerson).length}명</b> · 관계 <b>${mine.length}개</b><br>` +
+    Object.keys(TYPES).filter(k => count[k]).map(k => pill(k) + `<small>${count[k]}</small>`).join(" ");
+  const q = tableFilter.value.trim();
+  const rows = Object.entries(byPerson)
+    .filter(([other, list]) => !q || other.includes(q) || list.some(e => (TYPES[e.type]?.name || "").includes(q)))
+    .sort((a, b) => a[0].localeCompare(b[0], "ko"));
+  tableBody.innerHTML = rows.map(([other, list]) =>
+    `<tr data-name="${esc(other)}" onclick="goTo(this.dataset.name)"><td><b>${esc(other)}</b></td><td>${
+      list.sort((a, b) => Object.keys(TYPES).indexOf(a.type) - Object.keys(TYPES).indexOf(b.type)).map(e => pill(e.type, e.strength)).join("")
+    }</td></tr>`).join("") || `<tr><td colspan="2">${q ? "찾는 결과가 없어요" : "아직 연결된 관계가 없어요"}</td></tr>`;
+}
+function goTo(name) {
+  closeTable();
+  if (!nodes.get(name)) return;
+  network.selectNodes([name]); network.focus(name, { scale:1.3, animation:{ duration:500 } });
+  firstPick = name; showSelection({ type:"node", id:name });
+}
+function focusOn(name, rerender = true) {
+  focusPerson = name || null;
+  focusBar.classList.toggle("show", !!focusPerson);
+  if (focusPerson) focusText.textContent = `${focusPerson}의 관계만 보는 중`;
+  if (rerender) { render(false); setTimeout(() => network.fit({ animation:{ duration:500 } }), 50); }
+}
+
 /* ============ 추가 / 삭제 ============ */
 function addPerson() {
   const name = pName.value.trim(); if (!name) return;
@@ -541,6 +643,7 @@ let relPair = null, firstPick = null;
 function openRel(a, b) {
   relPair = [a, b];
   relTitle.textContent = `${a}  –  ${b}`;
+  relTypes = new Set(); renderChips();
   relScreen.classList.add("show");
 }
 function closeRel() {
@@ -555,9 +658,17 @@ function pickByName() {
 }
 function addRelation() {
   if (!relPair) return;
+  if (!relTypes.size) { setStatus("관계를 하나 이상 골라 주세요", "err"); return; }
   const [from, to] = relPair;
-  push({ op:"addEdge", edge:{ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
-         from, to, type:relType, strength:+rStrength.value } });
+  const existing = edges.get().filter(e => (e.from === from && e.to === to) || (e.from === to && e.to === from)).map(e => e.type);
+  let added = 0;
+  for (const type of relTypes) {
+    if (existing.includes(type)) continue;              // 같은 관계가 이미 있으면 건너뜀
+    push({ op:"addEdge", edge:{ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6) + type,
+           from, to, type, strength:+rStrength.value } });
+    added++;
+  }
+  if (!added) setStatus("이미 있는 관계예요", "err");
   rFrom.value = ""; rTo.value = "";
   closeRel();
 }
@@ -579,9 +690,11 @@ function showSelection(sel) {
   if (sel.type === "node") {
     el.innerHTML = `<b>${esc(sel.id)}</b> 선택됨<br>연결하려면 다른 사람을 클릭하세요. (삭제하면 연결된 관계도 함께 지워져요)`;
     selText.innerHTML = `<b>${esc(sel.id)}</b> 선택됨<br><small>연결할 사람을 탭하세요</small>`;
+    tName.value = sel.id; selTableBtn.style.display = "";
   } else {
     const e = edges.get(sel.id);
     el.textContent = `관계: ${e.from} – ${e.to} (${TYPES[e.type]?.name}, 강도 ${e.strength})`;
+    selTableBtn.style.display = "none";
     selText.innerHTML = `<b>${esc(e.from)} – ${esc(e.to)}</b><br><small>${TYPES[e.type]?.name} · 강도 ${e.strength}</small>`;
   }
 }
